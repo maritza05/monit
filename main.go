@@ -48,9 +48,11 @@ func findError(f *os.File, bufer []byte, done chan bool, offset *int64) {
 	fmt.Println("Calling function!")
 	n2, err := f.Read(bufer)
 	if err != nil {
-		fmt.Println("Some error happened!")
-		done <- true
-		return
+		if err != io.EOF {
+			fmt.Println("Some error happened!")
+			done <- true
+			return
+		}
 	}
 
 	content := string(bufer[:n2])
