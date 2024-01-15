@@ -23,31 +23,25 @@ func main() {
 	_, err = f.Seek(offset, 0)
 	ticker := time.NewTicker(time.Second * 10)
 	buf := make([]byte, 800)
-	done := make(chan bool)
-	quit := make(chan bool)
-
-	go func() {
-		time.Sleep(10 * time.Hour)
-		ticker.Stop()
-		quit <- true
-	}()
+	done := make(chan bool, 1)
 
 	go func() {
 		for {
 			select {
-			case <-done:
-				ticker.Stop()
-				quit <- true
+			case <-time.After(time.Second * 10):
+				fmt.Println("We got to done!!!!")
+				done <- true
 				return
 			case <-ticker.C:
 				findError(f, buf, done, &nBytes)
 			}
 		}
 	}()
-	select {
-	case <-quit:
-		os.Exit(0)
-	}
+
+	<-done
+	fmt.Println("Stopping program!!!")
+	ticker.Stop()
+	close(done)
 }
 
 func findError(f *os.File, bufer []byte, done chan bool, offset *int64) {
@@ -65,6 +59,7 @@ func findError(f *os.File, bufer []byte, done chan bool, offset *int64) {
 	if strings.Contains(content, "ERROR") {
 		fmt.Printf("Found error at!! %s", content)
 		done <- true
+		return
 	}
 	*offset += int64(n2)
 	f.Seek(*offset, 0)
