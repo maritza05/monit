@@ -11,9 +11,56 @@ import (
 	"time"
 )
 
+type Result struct {
+	message string
+	logFile string
+}
+
 func main() {
-	f, err := os.Open("./testfile.log")
+	filenames := []string{
+		"testfile.log",
+		"testfile_short.log",
+		"testfile_empty.log",
+	}
+	results := make(chan Result, len(filenames))
+	quit := make(chan string)
+
+	// Launching go routines for files
+	for _, f := range filenames {
+		// Doing this because of range variable f captured by func literal warning
+		ff := f
+		fmt.Printf("Type %T, value: %s\n", ff, ff)
+		go func() {
+			readFile(ff, results)
+		}()
+	}
+
+	// Start timer
+	go func() {
+		<-time.After(time.Minute * 10)
+		quit <- "End of timeout"
+	}()
+
+	// Wait for goroutines
+	go func() {
+		for result := range results {
+			fmt.Println("======================")
+			fmt.Printf("This is the error found in file: %s\n", result.logFile)
+			fmt.Println(result.message)
+		}
+		quit <- "All files completed"
+	}()
+
+	reason := <-quit
+	fmt.Println(reason)
+
+}
+
+func readFile(filename string, results chan Result) {
+	fmt.Printf("Trying to read: %s\n", filename)
+	f, err := os.Open(filename)
 	if err != nil {
+		fmt.Println(err)
 		panic("Error while trying to read file")
 	}
 	defer f.Close()
@@ -23,45 +70,28 @@ func main() {
 	_, err = f.Seek(offset, 0)
 	ticker := time.NewTicker(time.Second * 10)
 	buf := make([]byte, 800)
-	done := make(chan bool, 1)
 
-	go func() {
-		for {
-			select {
-			case <-time.After(time.Second * 10):
-				fmt.Println("We got to done!!!!")
-				done <- true
-				return
-			case <-ticker.C:
-				findError(f, buf, done, &nBytes)
-			}
-		}
-	}()
+	for range ticker.C {
+		findError(f, buf, &nBytes, results)
+	}
 
-	<-done
-	fmt.Println("Stopping program!!!")
 	ticker.Stop()
-	close(done)
 }
 
-func findError(f *os.File, bufer []byte, done chan bool, offset *int64) {
+func findError(f *os.File, bufer []byte, offset *int64, results chan Result) {
 	fmt.Println("Calling function!")
 	n2, err := f.Read(bufer)
 	if err != nil {
 		if err != io.EOF {
 			fmt.Println("Some error happened!")
-			done <- true
-			return
+			results <- Result{logFile: f.Name(), message: fmt.Sprintf("No error found because: %s", err)}
 		}
 	}
 
 	content := string(bufer[:n2])
 
-	fmt.Printf("++ %s", content)
 	if strings.Contains(content, "ERROR") {
-		fmt.Printf("Found error at!! %s", content)
-		done <- true
-		return
+		results <- Result{logFile: f.Name(), message: content}
 	}
 	*offset += int64(n2)
 	f.Seek(*offset, 0)
