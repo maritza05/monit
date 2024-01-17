@@ -72,29 +72,38 @@ func readFile(filename string, results chan Result) {
 	buf := make([]byte, 800)
 
 	for range ticker.C {
-		findError(f, buf, &nBytes, results)
+		content, found, err := findError(f, buf, &nBytes)
+		if err != nil {
+			results <- Result{logFile: f.Name(), message: fmt.Sprintf("No error found because: %s", err)}
+			return
+		}
+		if found {
+			results <- Result{logFile: f.Name(), message: content}
+			return
+		}
 	}
 
 	ticker.Stop()
 }
 
-func findError(f *os.File, bufer []byte, offset *int64, results chan Result) {
+func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
 	fmt.Println("Calling function!")
 	n2, err := f.Read(bufer)
 	if err != nil {
 		if err != io.EOF {
 			fmt.Println("Some error happened!")
-			results <- Result{logFile: f.Name(), message: fmt.Sprintf("No error found because: %s", err)}
+			return "", false, err
 		}
 	}
 
 	content := string(bufer[:n2])
 
 	if strings.Contains(content, "ERROR") {
-		results <- Result{logFile: f.Name(), message: content}
+		return content, true, nil
 	}
 	*offset += int64(n2)
 	f.Seek(*offset, 0)
+	return "", false, nil
 }
 
 func getOffset(reader io.Reader, lineNum int) int64 {
