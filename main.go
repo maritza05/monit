@@ -16,6 +16,11 @@ type Result struct {
 	logFile string
 }
 
+type FileLog struct {
+	name       string
+	lineOffset int64
+}
+
 func main() {
 	filenames := []string{
 		"testfile.log",
@@ -31,6 +36,7 @@ func main() {
 		ff := f
 		fmt.Printf("Type %T, value: %s\n", ff, ff)
 		go func() {
+			fmt.Printf("--> Launching go routine for: %s\n", ff)
 			readFile(ff, results)
 		}()
 	}
@@ -64,11 +70,11 @@ func readFile(filename string, results chan Result) {
 		panic("Error while trying to read file")
 	}
 	defer f.Close()
-	offset := getOffset(f, 7)
+	offset := getOffset(f, 1)
 	nBytes := offset
 	fmt.Printf("++++This is the offtset: %d", offset)
 	_, err = f.Seek(offset, 0)
-	ticker := time.NewTicker(time.Second * 10)
+	ticker := time.NewTicker(time.Second * 5)
 	buf := make([]byte, 800)
 
 	for range ticker.C {
@@ -90,10 +96,8 @@ func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
 	fmt.Println("Calling function!")
 	n2, err := f.Read(bufer)
 	if err != nil {
-		if err != io.EOF {
-			fmt.Println("Some error happened!")
-			return "", false, err
-		}
+		fmt.Println("Some error happened!")
+		return "", false, err
 	}
 
 	content := string(bufer[:n2])
