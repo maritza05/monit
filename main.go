@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,25 +28,30 @@ func main() {
 		{"testfile_short.log", 1},
 		{"testfile_empty.log", 1},
 	}
+	TICKINTERVAL := time.Second * 5
 	results := make(chan Result, len(filenames))
 	quit := make(chan string, 1)
+	ERROR_REGEX, err := regexp.Compile("ERROR|WARN")
+	if err != nil {
+		panic("Invalid regex")
+	}
 
 	// Launching go routines for files
 	for _, f := range filenames {
 		// Doing this because of range variable f captured by func literal warning
 		ff := f
 		go func() {
-			readFile(ff, results)
+			readFile(ff, results, TICKINTERVAL, ERROR_REGEX)
 		}()
 	}
 
-	// Start timer
+	//Start timer
 	go func() {
 		<-time.After(time.Minute * 10)
 		quit <- "End of timeout"
 	}()
 
-	// Wait for goroutines
+	//Wait for goroutines
 	go func() {
 		for i := 0; i < len(filenames); i++ {
 			fmt.Println("======================")
@@ -61,7 +67,7 @@ func main() {
 
 }
 
-func readFile(flog FileLog, results chan Result) {
+func readFile(flog FileLog, results chan Result, tickInterval time.Duration) {
 	// Trying to read file
 	f, err := os.Open(flog.name)
 	if err != nil {
@@ -74,7 +80,10 @@ func readFile(flog FileLog, results chan Result) {
 	nBytes := offset
 	_, err = f.Seek(offset, 0)
 
-	ticker := time.NewTicker(time.Second * 5)
+	// Start ticker
+	ticker := time.NewTicker(tickInterval)
+
+	// Size of error snippet
 	buf := make([]byte, 800)
 
 	for range ticker.C {
@@ -95,7 +104,6 @@ func readFile(flog FileLog, results chan Result) {
 func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
 	n2, err := f.Read(bufer)
 	if err != nil {
-		fmt.Println("Some error happened!")
 		return "", false, err
 	}
 
