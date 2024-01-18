@@ -22,21 +22,19 @@ type FileLog struct {
 }
 
 func main() {
-	filenames := []string{
-		"testfile.log",
-		"testfile_short.log",
-		"testfile_empty.log",
+	filenames := []FileLog{
+		{"testfile.log", 7},
+		{"testfile_short.log", 1},
+		{"testfile_empty.log", 1},
 	}
 	results := make(chan Result, len(filenames))
-	quit := make(chan string)
+	quit := make(chan string, 1)
 
 	// Launching go routines for files
 	for _, f := range filenames {
 		// Doing this because of range variable f captured by func literal warning
 		ff := f
-		fmt.Printf("Type %T, value: %s\n", ff, ff)
 		go func() {
-			fmt.Printf("--> Launching go routine for: %s\n", ff)
 			readFile(ff, results)
 		}()
 	}
@@ -49,10 +47,11 @@ func main() {
 
 	// Wait for goroutines
 	go func() {
-		for result := range results {
+		for i := 0; i < len(filenames); i++ {
 			fmt.Println("======================")
-			fmt.Printf("This is the error found in file: %s\n", result.logFile)
-			fmt.Println(result.message)
+			foundError := <-results
+			fmt.Printf("This is the error found in file: %s\n", foundError.logFile)
+			fmt.Println(foundError.message)
 		}
 		quit <- "All files completed"
 	}()
@@ -62,18 +61,19 @@ func main() {
 
 }
 
-func readFile(filename string, results chan Result) {
-	fmt.Printf("Trying to read: %s\n", filename)
-	f, err := os.Open(filename)
+func readFile(flog FileLog, results chan Result) {
+	// Trying to read file
+	f, err := os.Open(flog.name)
 	if err != nil {
-		fmt.Println(err)
-		panic("Error while trying to read file")
+		results <- Result{logFile: flog.name, message: fmt.Sprintf("No error found because: %s", err)}
+		return
 	}
 	defer f.Close()
-	offset := getOffset(f, 1)
+
+	offset := getOffset(f, int(flog.lineOffset))
 	nBytes := offset
-	fmt.Printf("++++This is the offtset: %d", offset)
 	_, err = f.Seek(offset, 0)
+
 	ticker := time.NewTicker(time.Second * 5)
 	buf := make([]byte, 800)
 
@@ -93,7 +93,6 @@ func readFile(filename string, results chan Result) {
 }
 
 func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
-	fmt.Println("Calling function!")
 	n2, err := f.Read(bufer)
 	if err != nil {
 		fmt.Println("Some error happened!")
