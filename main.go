@@ -8,7 +8,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -27,6 +26,7 @@ func main() {
 		{"testfile.log", 7},
 		{"testfile_short.log", 1},
 		{"testfile_empty.log", 1},
+		{"testfile_regex.log", 1},
 	}
 	TICKINTERVAL := time.Second * 5
 	results := make(chan Result, len(filenames))
@@ -67,7 +67,7 @@ func main() {
 
 }
 
-func readFile(flog FileLog, results chan Result, tickInterval time.Duration) {
+func readFile(flog FileLog, results chan Result, tickInterval time.Duration, regex *regexp.Regexp) {
 	// Trying to read file
 	f, err := os.Open(flog.name)
 	if err != nil {
@@ -87,7 +87,7 @@ func readFile(flog FileLog, results chan Result, tickInterval time.Duration) {
 	buf := make([]byte, 800)
 
 	for range ticker.C {
-		content, found, err := findError(f, buf, &nBytes)
+		content, found, err := findError(f, buf, &nBytes, regex)
 		if err != nil {
 			results <- Result{logFile: f.Name(), message: fmt.Sprintf("No error found because: %s", err)}
 			return
@@ -101,7 +101,7 @@ func readFile(flog FileLog, results chan Result, tickInterval time.Duration) {
 	ticker.Stop()
 }
 
-func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
+func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (string, bool, error) {
 	n2, err := f.Read(bufer)
 	if err != nil {
 		return "", false, err
@@ -109,7 +109,7 @@ func findError(f *os.File, bufer []byte, offset *int64) (string, bool, error) {
 
 	content := string(bufer[:n2])
 
-	if strings.Contains(content, "ERROR") {
+	if regex.MatchString(content) {
 		return content, true, nil
 	}
 	*offset += int64(n2)
