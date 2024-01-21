@@ -1,19 +1,15 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
-	"strconv"
 	"time"
 )
 
 type Result struct {
-	message string
-	logFile string
+	message  string
+	filepath string
 }
 
 type FileLog struct {
@@ -22,41 +18,49 @@ type FileLog struct {
 }
 
 func main() {
-	filenames := []FileLog{
-		{"testfile.log", 7},
-		{"testfile_short.log", 1},
-		{"testfile_empty.log", 1},
-		{"testfile_regex.log", 1},
+	f := &flags{
+		offset:   1,
+		interval: time.Second * 5,
+		limit:    time.Hour * 10,
+		pattern:  "ERROR|WARN",
 	}
-	TICKINTERVAL := time.Second * 5
-	results := make(chan Result, len(filenames))
-	quit := make(chan string, 1)
-	ERROR_REGEX, err := regexp.Compile("ERROR|WARN")
+
+	if err := f.parse(); err != nil {
+		os.Exit(1)
+	}
+	ERROR_REGEX, err := regexp.Compile(f.pattern)
 	if err != nil {
 		panic("Invalid regex")
 	}
 
+	results := make(chan Result, len(f.filepaths))
+	quit := make(chan string, 1)
+
 	// Launching go routines for files
-	for _, f := range filenames {
+	for _, n := range f.filepaths {
 		// Doing this because of range variable f captured by func literal warning
-		ff := f
+		ff := n
 		go func() {
-			readFile(ff, results, TICKINTERVAL, ERROR_REGEX)
+			monitor := &FileMonitor{offset: f.offset,
+				interval: f.interval,
+				regex:    ERROR_REGEX,
+				filepath: ff}
+			monitor.Start(results)
 		}()
 	}
 
-	//Start timer
+	// Start timer
 	go func() {
-		<-time.After(time.Minute * 10)
+		<-time.After(f.limit)
 		quit <- "End of timeout"
 	}()
 
-	//Wait for goroutines
+	// Wait for goroutines
 	go func() {
-		for i := 0; i < len(filenames); i++ {
+		for i := 0; i < len(f.filepaths); i++ {
 			fmt.Println("======================")
 			foundError := <-results
-			fmt.Printf("This is the error found in file: %s\n", foundError.logFile)
+			fmt.Printf("This is the error found in file: %s\n", foundError.filepath)
 			fmt.Println(foundError.message)
 		}
 		quit <- "All files completed"
@@ -65,67 +69,4 @@ func main() {
 	reason := <-quit
 	fmt.Println(reason)
 
-}
-
-func readFile(flog FileLog, results chan Result, tickInterval time.Duration, regex *regexp.Regexp) {
-	// Trying to read file
-	f, err := os.Open(flog.name)
-	if err != nil {
-		results <- Result{logFile: flog.name, message: fmt.Sprintf("No error found because: %s", err)}
-		return
-	}
-	defer f.Close()
-
-	offset := getOffset(f, int(flog.lineOffset))
-	nBytes := offset
-	_, err = f.Seek(offset, 0)
-
-	// Start ticker
-	ticker := time.NewTicker(tickInterval)
-
-	// Size of error snippet
-	buf := make([]byte, 800)
-
-	for range ticker.C {
-		content, found, err := findError(f, buf, &nBytes, regex)
-		if err != nil {
-			results <- Result{logFile: f.Name(), message: fmt.Sprintf("No error found because: %s", err)}
-			return
-		}
-		if found {
-			results <- Result{logFile: f.Name(), message: content}
-			return
-		}
-	}
-
-	ticker.Stop()
-}
-
-func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (string, bool, error) {
-	n2, err := f.Read(bufer)
-	if err != nil {
-		return "", false, err
-	}
-
-	content := string(bufer[:n2])
-
-	if regex.MatchString(content) {
-		return content, true, nil
-	}
-	*offset += int64(n2)
-	f.Seek(*offset, 0)
-	return "", false, nil
-}
-
-func getOffset(reader io.Reader, lineNum int) int64 {
-	scanner := bufio.NewScanner(reader)
-	bytesRead := int64(0)
-	for scanner.Scan() {
-		currentSlice := scanner.Bytes()
-		if bytes.Contains(currentSlice, []byte(strconv.Itoa(lineNum))) {
-			return bytesRead
-		}
-		bytesRead += int64(len(currentSlice))
-	}
-	return bytesRead
 }
