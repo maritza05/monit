@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"time"
@@ -23,15 +24,34 @@ func main() {
 		interval: time.Second * 5,
 		limit:    time.Hour * 10,
 		pattern:  "ERROR|WARN",
+		verbose:  false,
+		local:    "",
 	}
 
 	if err := f.parse(); err != nil {
 		os.Exit(1)
 	}
+
 	ERROR_REGEX, err := regexp.Compile(f.pattern)
 	if err != nil {
 		panic("Invalid regex")
 	}
+
+	if len(f.local) > 0 {
+		file, err := os.OpenFile(f.local, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+
+		if err != nil {
+			panic(err)
+		}
+		log.SetOutput(file)
+	}
+
+	fmt.Println(os.Getenv("SLACK_BOT_TOKEN"))
+	fmt.Println(os.Getenv("SLACK_CHANNEL_ID"))
+
+	notifier := NewSlackNotifier(
+		os.Getenv("SLACK_BOT_TOKEN"),
+		os.Getenv("SLACK_CHANNEL_ID"))
 
 	results := make(chan Result, len(f.filepaths))
 	quit := make(chan string, 1)
@@ -58,15 +78,19 @@ func main() {
 	// Wait for goroutines
 	go func() {
 		for i := 0; i < len(f.filepaths); i++ {
-			fmt.Println("======================")
 			foundError := <-results
-			fmt.Printf("This is the error found in file: %s\n", foundError.filepath)
-			fmt.Println(foundError.message)
+			message := fmt.Sprintf("This is the error found in file: %s\n%s", foundError.filepath, foundError.message)
+			if f.verbose || len(f.local) > 0 {
+				log.Println(message)
+			} else {
+				notifier.Notify(message)
+			}
+
 		}
 		quit <- "All files completed"
 	}()
 
 	reason := <-quit
-	fmt.Println(reason)
+	log.Println(reason)
 
 }

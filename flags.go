@@ -29,6 +29,8 @@ type flags struct {
 	interval  time.Duration
 	limit     time.Duration
 	pattern   string
+	verbose   bool
+	local     string
 }
 
 func (f *flags) parse() error {
@@ -37,6 +39,8 @@ func (f *flags) parse() error {
 	flag.DurationVar(&f.interval, "interval", f.interval, "Interval at which the file will be checked")
 	flag.DurationVar(&f.limit, "limit", f.limit, "By what time the program will be running")
 	flag.StringVar(&f.pattern, "pattern", f.pattern, "Pattern to look for errors in file")
+	flag.BoolVar(&f.verbose, "verbose", f.verbose, "Verbose mode, shows the errors in the standard output")
+	flag.StringVar(&f.local, "local", f.local, "Store notifications in a file instead of sending them through slack")
 	flag.Parse()
 
 	if err := f.validate(); err != nil {
