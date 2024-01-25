@@ -19,13 +19,14 @@ type FileLog struct {
 }
 
 func main() {
+	var notifier Notifier
 	f := &flags{
 		offset:   1,
 		interval: time.Second * 5,
 		limit:    time.Hour * 10,
 		pattern:  "ERROR|WARN",
-		verbose:  false,
-		local:    "",
+		verbose:  true,
+		slack:    false,
 	}
 
 	if err := f.parse(); err != nil {
@@ -37,18 +38,14 @@ func main() {
 		panic("Invalid regex")
 	}
 
-	if len(f.local) > 0 {
-		file, err := os.OpenFile(f.local, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-
-		if err != nil {
-			panic(err)
-		}
-		log.SetOutput(file)
+	switch {
+	case f.slack:
+		notifier = NewSlackNotifier(
+			os.Getenv("SLACK_BOT_TOKEN"),
+			os.Getenv("SLACK_CHANNEL_ID"))
+	default:
+		notifier = NewFileNotifier(f.output_file)
 	}
-
-	notifier := NewSlackNotifier(
-		os.Getenv("SLACK_BOT_TOKEN"),
-		os.Getenv("SLACK_CHANNEL_ID"))
 
 	results := make(chan Result, len(f.filepaths))
 	quit := make(chan string, 1)
@@ -77,11 +74,10 @@ func main() {
 		for i := 0; i < len(f.filepaths); i++ {
 			foundError := <-results
 			message := fmt.Sprintf("This is the error found in file: %s\n%s", foundError.filepath, foundError.message)
-			if f.verbose || len(f.local) > 0 {
+			if f.verbose {
 				log.Println(message)
-			} else {
-				notifier.Notify(message)
 			}
+			notifier.Notify(message)
 
 		}
 		quit <- "All files completed"

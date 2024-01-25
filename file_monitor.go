@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -65,27 +64,14 @@ func (monitor *FileMonitor) Start(results chan Result) {
 }
 
 func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (string, bool, error) {
-	// Check if file is empty or has a smaller size than offset
-	// fileInfo, err := f.Stat()
-	// if err != nil {
-	// 	return "", false, err
-	// }
-	// if fileInfo.Size() < *offset {
-	// 	return "", false, nil
-	// }
-
 	n2, err := f.Read(bufer)
 	// if we reach end to file wait for next ticker
 	if errors.Is(err, io.EOF) {
-		log.Printf("Called for: %s\n", f.Name())
-		log.Println(err)
 		return "", false, nil
 	}
 
 	// if is another kind of error return the error
 	if err != nil {
-		log.Printf("Called for: %s\n", f.Name())
-		log.Println(err)
 		return "", false, err
 	}
 

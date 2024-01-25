@@ -24,13 +24,14 @@ func (f *filepaths) Set(value string) error {
 }
 
 type flags struct {
-	filepaths filepaths
-	offset    int64
-	interval  time.Duration
-	limit     time.Duration
-	pattern   string
-	verbose   bool
-	local     string
+	filepaths   filepaths
+	offset      int64
+	interval    time.Duration
+	limit       time.Duration
+	pattern     string
+	verbose     bool
+	slack       bool
+	output_file string
 }
 
 func (f *flags) parse() error {
@@ -40,7 +41,8 @@ func (f *flags) parse() error {
 	flag.DurationVar(&f.limit, "limit", f.limit, "By what time the program will be running")
 	flag.StringVar(&f.pattern, "pattern", f.pattern, "Pattern to look for errors in file")
 	flag.BoolVar(&f.verbose, "verbose", f.verbose, "Verbose mode, shows the errors in the standard output")
-	flag.StringVar(&f.local, "local", f.local, "Store notifications in a file instead of sending them through slack")
+	flag.BoolVar(&f.slack, "slack", f.slack, "Send notification through slack")
+	flag.StringVar(&f.output_file, "output_file", f.output_file, "Store found patterns in file (needs to be absolute path)")
 	flag.Parse()
 
 	if err := f.validate(); err != nil {
@@ -53,8 +55,6 @@ func (f *flags) validate() error {
 	if f.offset < 1 {
 		return errors.New("The offset should be equal or greater than 1")
 	}
-	// if f.interval < time.Minute*15 {
-	// 	return errors.New("The interval time should be greater than 15 minutes")
-	// }
+	// TODO: Should there be a check for the minimum interval that we can have?
 	return nil
 }

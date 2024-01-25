@@ -1,8 +1,37 @@
 package main
 
 import (
+	"os"
+	"sync"
+
 	"github.com/slack-go/slack"
 )
+
+type Notifier interface {
+	Notify(string)
+}
+
+type FileNotifier struct {
+	mu       sync.Mutex
+	filepath string
+}
+
+func NewFileNotifier(filepath string) *FileNotifier {
+	return &FileNotifier{
+		filepath: filepath,
+	}
+}
+
+func (n *FileNotifier) Notify(message string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	file, err := os.Create(n.filepath)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	file.WriteString(message)
+}
 
 type SlackNotifier struct {
 	tokenID   string
