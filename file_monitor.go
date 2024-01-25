@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -22,14 +24,24 @@ func (monitor *FileMonitor) Start(results chan Result) {
 	// Trying to read file
 	f, err := os.Open(monitor.filepath)
 	if err != nil {
-		results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No error found because: %s", err)}
+		results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
 		return
 	}
 	defer f.Close()
 
 	offset := getOffset(f, int(monitor.offset))
 	nBytes := offset
-	_, err = f.Seek(offset, 0)
+
+	// Move file offset just if file size is greater than offset
+	fileInfo, err := f.Stat()
+	if err != nil {
+		results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
+		return
+	}
+
+	if fileInfo.Size() > offset {
+		_, err = f.Seek(offset, 0)
+	}
 
 	// Start ticker
 	ticker := time.NewTicker(monitor.interval)
@@ -40,7 +52,7 @@ func (monitor *FileMonitor) Start(results chan Result) {
 	for range ticker.C {
 		content, found, err := findError(f, buf, &nBytes, monitor.regex)
 		if err != nil {
-			results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No error found because: %s", err)}
+			results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
 			return
 		}
 		if found {
@@ -53,8 +65,27 @@ func (monitor *FileMonitor) Start(results chan Result) {
 }
 
 func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (string, bool, error) {
+	// Check if file is empty or has a smaller size than offset
+	// fileInfo, err := f.Stat()
+	// if err != nil {
+	// 	return "", false, err
+	// }
+	// if fileInfo.Size() < *offset {
+	// 	return "", false, nil
+	// }
+
 	n2, err := f.Read(bufer)
+	// if we reach end to file wait for next ticker
+	if errors.Is(err, io.EOF) {
+		log.Printf("Called for: %s\n", f.Name())
+		log.Println(err)
+		return "", false, nil
+	}
+
+	// if is another kind of error return the error
 	if err != nil {
+		log.Printf("Called for: %s\n", f.Name())
+		log.Println(err)
 		return "", false, err
 	}
 

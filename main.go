@@ -46,9 +46,6 @@ func main() {
 		log.SetOutput(file)
 	}
 
-	fmt.Println(os.Getenv("SLACK_BOT_TOKEN"))
-	fmt.Println(os.Getenv("SLACK_CHANNEL_ID"))
-
 	notifier := NewSlackNotifier(
 		os.Getenv("SLACK_BOT_TOKEN"),
 		os.Getenv("SLACK_CHANNEL_ID"))
