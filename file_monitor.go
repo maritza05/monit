@@ -3,38 +3,66 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 )
 
-type FileMonitor struct {
+type FileProtector struct {
 	filepath string
-	offset   int64
-	interval time.Duration
-	regex    *regexp.Regexp
+	mu       sync.Mutex
+}
+
+type FileMonitor struct {
+	filepath  string
+	offset    int64
+	interval  time.Duration
+	regex     *regexp.Regexp
+	storeFile string
+}
+
+type Result struct {
+	filepath string
+	error    error
+	found    bool
+	content  string
 }
 
 func (monitor *FileMonitor) Start(results chan Result) {
 	// Trying to read file
 	f, err := os.Open(monitor.filepath)
 	if err != nil {
-		results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
+		results <- Result{filepath: monitor.filepath, error: err}
 		return
 	}
 	defer f.Close()
 
-	offset := getOffset(f, int(monitor.offset))
+	record := map[string]int64{}
+	var offset int64
+	fileProtector := &FileProtector{filepath: monitor.storeFile}
+	initialOffset := fileProtector.getOffsetFromFile(monitor.filepath, record)
+	fmt.Printf("This is the initial offset: %d\n", initialOffset)
+
+	// We have a biggest offset stored in json file so use that one
+	if initialOffset >= monitor.offset {
+		offset = getOffset(f, int(initialOffset))
+	} else {
+		offset = getOffset(f, int(monitor.offset))
+	}
 	nBytes := offset
 
 	// Move file offset just if file size is greater than offset
 	fileInfo, err := f.Stat()
 	if err != nil {
-		results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
+		results <- Result{filepath: monitor.filepath, error: err}
 		return
 	}
 
@@ -42,28 +70,26 @@ func (monitor *FileMonitor) Start(results chan Result) {
 		_, err = f.Seek(offset, 0)
 	}
 
-	// Start ticker
-	ticker := time.NewTicker(monitor.interval)
-
 	// Size of error snippet
 	buf := make([]byte, 800)
 
-	for range ticker.C {
-		content, found, err := findError(f, buf, &nBytes, monitor.regex)
-		if err != nil {
-			results <- Result{filepath: monitor.filepath, message: fmt.Sprintf("No pattern found because: %s", err)}
-			return
-		}
-		if found {
-			results <- Result{filepath: monitor.filepath, message: content}
-			return
-		}
+	content, found, err := findError(f, buf, &nBytes, monitor.regex, fileProtector, record)
+	if err != nil {
+		results <- Result{filepath: monitor.filepath, error: err}
+		return
+	}
+	if found {
+		results <- Result{filepath: monitor.filepath, found: true, content: content}
+		return
+	}
+	if !found && err == nil {
+		results <- Result{filepath: monitor.filepath, found: false, error: nil}
 	}
 
-	ticker.Stop()
 }
 
-func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (string, bool, error) {
+func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp, fileProtector *FileProtector, record map[string]int64) (string, bool, error) {
+	fmt.Println("Calling find error1")
 	n2, err := f.Read(bufer)
 	// if we reach end to file wait for next ticker
 	if errors.Is(err, io.EOF) {
@@ -81,7 +107,9 @@ func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp) (s
 		return content, true, nil
 	}
 	*offset += int64(n2)
-	f.Seek(*offset, 0)
+	record[fileProtector.filepath] = *offset
+	fmt.Printf("%q", record)
+	fileProtector.storeOffsetInFile(record)
 	return "", false, nil
 }
 
@@ -96,4 +124,44 @@ func getOffset(reader io.Reader, lineNum int) int64 {
 		bytesRead += int64(len(currentSlice))
 	}
 	return bytesRead
+}
+
+func (p *FileProtector) getOffsetFromFile(filepath string, record map[string]int64) int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, err := os.Create(p.filepath)
+	if err != nil {
+		log.Printf("Error while trying to get offset: %s - %s\n", p.filepath, err)
+		panic("Some error happened")
+	}
+	defer f.Close()
+
+	byteValue, _ := ioutil.ReadAll(f)
+	json.Unmarshal(byteValue, record)
+
+	if value, ok := record[filepath]; ok {
+		return value
+	}
+	return 1
+}
+
+func (p *FileProtector) storeOffsetInFile(value map[string]int64) {
+	fmt.Println("Calling store in file")
+	fmt.Printf("What is going to be writen: %q", value)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, err := os.Open(p.filepath)
+	if err != nil {
+		panic("Error while trying to get offset")
+	}
+	defer f.Close()
+
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		panic("Error when trying to write offset")
+	}
+	err = ioutil.WriteFile(p.filepath, bytes, 06444)
+	if err != nil {
+		panic("Error when trying to write offset")
+	}
 }
