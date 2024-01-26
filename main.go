@@ -21,12 +21,13 @@ type FileLog struct {
 func main() {
 	var notifier Notifier
 	f := &flags{
-		offset:   1,
-		interval: time.Second * 5,
-		limit:    time.Hour * 10,
-		pattern:  "ERROR|WARN",
-		verbose:  true,
-		slack:    false,
+		offset:       1,
+		interval:     time.Second * 5,
+		limit:        time.Hour * 10,
+		pattern:      "ERROR|WARN",
+		verbose:      false,
+		slack:        false,
+		hide_finding: true,
 	}
 
 	if err := f.parse(); err != nil {
@@ -70,12 +71,17 @@ func main() {
 	}()
 
 	// Wait for goroutines
+	var message string
 	go func() {
 		for i := 0; i < len(f.filepaths); i++ {
 			foundError := <-results
-			message := fmt.Sprintf("This is the error found in file: %s\n%s", foundError.filepath, foundError.message)
+			if f.hide_finding && f.slack {
+				message = fmt.Sprintf("Error found in file: %s", foundError.filepath)
+			} else {
+				message = fmt.Sprintf("This is the error found in file: %s\n%s", foundError.filepath, foundError.message)
+			}
 			if f.verbose {
-				log.Println(message)
+				log.Println(fmt.Sprintf("This is the error found in file: %s\n%s", foundError.filepath, foundError.message))
 			}
 			notifier.Notify(message)
 
