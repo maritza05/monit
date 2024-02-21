@@ -45,19 +45,18 @@ func (monitor *FileMonitor) Start(results chan Result) {
 	}
 	defer f.Close()
 
-	record := map[string]int64{}
+	record := make(map[string]int64)
 	var offset int64
 	fileProtector := &FileProtector{filepath: monitor.storeFile}
 	initialOffset := fileProtector.getOffsetFromFile(monitor.filepath, record)
 	fmt.Printf("This is the initial offset: %d\n", initialOffset)
 
 	// We have a biggest offset stored in json file so use that one
-	if initialOffset >= monitor.offset {
-		offset = getOffset(f, int(initialOffset))
-	} else {
+	if initialOffset <= monitor.offset {
 		offset = getOffset(f, int(monitor.offset))
 	}
-	nBytes := offset
+	fmt.Printf("offset: %d\n", offset)
+	// nBytes := offset
 
 	// Move file offset just if file size is greater than offset
 	fileInfo, err := f.Stat()
@@ -73,7 +72,7 @@ func (monitor *FileMonitor) Start(results chan Result) {
 	// Size of error snippet
 	buf := make([]byte, 800)
 
-	content, found, err := findError(f, buf, &nBytes, monitor.regex, fileProtector, record)
+	content, found, err := findError(f, buf, &offset, monitor.regex, fileProtector, record, monitor.filepath)
 	if err != nil {
 		results <- Result{filepath: monitor.filepath, error: err}
 		return
@@ -88,7 +87,7 @@ func (monitor *FileMonitor) Start(results chan Result) {
 
 }
 
-func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp, fileProtector *FileProtector, record map[string]int64) (string, bool, error) {
+func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp, fileProtector *FileProtector, record map[string]int64, filepath string) (string, bool, error) {
 	fmt.Println("Calling find error1")
 	n2, err := f.Read(bufer)
 	// if we reach end to file wait for next ticker
@@ -104,10 +103,12 @@ func findError(f *os.File, bufer []byte, offset *int64, regex *regexp.Regexp, fi
 	content := string(bufer[:n2])
 
 	if regex.MatchString(content) {
+		fmt.Println("FOUND ERROR!!")
 		return content, true, nil
 	}
 	*offset += int64(n2)
-	record[fileProtector.filepath] = *offset
+	fmt.Printf("offset: %d\n", *offset)
+	record[filepath] = *offset
 	fmt.Printf("%q", record)
 	fileProtector.storeOffsetInFile(record)
 	return "", false, nil
@@ -129,15 +130,20 @@ func getOffset(reader io.Reader, lineNum int) int64 {
 func (p *FileProtector) getOffsetFromFile(filepath string, record map[string]int64) int64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	f, err := os.Create(p.filepath)
+	f, err := os.OpenFile(p.filepath, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		log.Printf("Error while trying to get offset: %s - %s\n", p.filepath, err)
 		panic("Some error happened")
 	}
 	defer f.Close()
 
-	byteValue, _ := ioutil.ReadAll(f)
-	json.Unmarshal(byteValue, record)
+	byteValue, _ := os.ReadFile(p.filepath)
+	fmt.Printf("Reading from file: %s -> %s", p.filepath, string(byteValue))
+	// myMap := make(map[string]int)
+	json.Unmarshal(byteValue, &record)
+	fmt.Println(record)
+	fmt.Println(record["offsets.json"])
+	fmt.Printf("This is the filepath: %s\n", filepath)
 
 	if value, ok := record[filepath]; ok {
 		return value
@@ -147,7 +153,8 @@ func (p *FileProtector) getOffsetFromFile(filepath string, record map[string]int
 
 func (p *FileProtector) storeOffsetInFile(value map[string]int64) {
 	fmt.Println("Calling store in file")
-	fmt.Printf("What is going to be writen: %q", value)
+	fmt.Println("What is going to be writen:")
+	fmt.Println(value)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	f, err := os.Open(p.filepath)
